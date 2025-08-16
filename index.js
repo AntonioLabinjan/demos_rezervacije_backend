@@ -12,6 +12,7 @@ app.use(bodyParser.json())
 
 const reservations = []
 
+// POST → kreiranje rezervacije
 app.post('/api/reservations', async (req, res) => {
   const { discordNickname, description, date, time } = req.body
 
@@ -21,7 +22,7 @@ app.post('/api/reservations', async (req, res) => {
 
   const dateTime = `${date} ${time}`
 
-  // Provjera da već ne postoji rezervacija za taj točan termin
+  // Provjera da već ne postoji rezervacija za taj termin
   const exists = reservations.find(r => r.dateTime === dateTime)
   if (exists) {
     return res.status(409).json({ message: 'Taj termin je već zauzet.' })
@@ -53,6 +54,11 @@ app.post('/api/reservations', async (req, res) => {
     console.error(err)
     res.status(500).json({ message: 'Greška kod slanja na Discord' })
   }
+})
+
+// GET → overview svih rezervacija
+app.get('/api/reservations', (req, res) => {
+  res.json(reservations)
 })
 
 app.listen(PORT, () => {
