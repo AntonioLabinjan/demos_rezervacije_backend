@@ -13,10 +13,11 @@ app.use(bodyParser.json())
 const reservations = []
 
 // POST → kreiranje rezervacije
+// POST → kreiranje rezervacije
 app.post('/api/reservations', async (req, res) => {
-  const { discordNickname, description, date, time } = req.body
+  const { discordNickname, description, date, time, course } = req.body
 
-  if (!discordNickname || !description || !date || !time) {
+  if (!discordNickname || !description || !date || !time || !course) {
     return res.status(400).json({ message: 'Sva polja su obavezna.' })
   }
 
@@ -34,13 +35,19 @@ app.post('/api/reservations', async (req, res) => {
     description,
     date,
     time,
+    course,
     dateTime
   }
   reservations.push(reservation)
 
   // Pošalji na Discord
   const message = {
-    content: `🧠 **Novi termin**\n👤 **STUDENT:** ${discordNickname}\n📅 **DATUM:** ${date}\n🕒 **VRIJEME:** ${time}\n📝 **OPIS:** ${description}`,
+    content: `🧠 **Novi termin**
+👤 **STUDENT:** ${discordNickname}
+📚 **KOLEGIJ:** ${course}
+📅 **DATUM:** ${date}
+🕒 **VRIJEME:** ${time}
+📝 **OPIS:** ${description}`,
   }
 
   try {
@@ -55,6 +62,7 @@ app.post('/api/reservations', async (req, res) => {
     res.status(500).json({ message: 'Greška kod slanja na Discord' })
   }
 })
+
 
 // GET → overview svih rezervacija
 app.get('/api/reservations', (req, res) => {
