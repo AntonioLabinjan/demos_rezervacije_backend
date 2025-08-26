@@ -51,6 +51,46 @@ app.get("/api/reservations", async (req, res) => {
   }
 });
 
+// POST problem
+app.post("/api/problems", async (req, res) => {
+  const { discordNickname, description, course, language, images } = req.body;
+
+  if (!discordNickname || !description || !course || !language) {
+    return res.status(400).json({ message: "Sva polja osim slike su obavezna." });
+  }
+
+  try {
+    const col = await getCollection("problems");
+
+    const problem = {
+      discordNickname,
+      description,
+      course,
+      language,
+      images: images || [], // može biti prazan niz ako nema slika
+      createdAt: new Date()
+    };
+
+    await col.insertOne(problem);
+
+    res.status(200).json({ message: "Problem uspješno postavljen!" });
+  } catch (err) {
+    console.error("🔥 Greška kod spremanja problema:", err);
+    res.status(500).json({ message: "Greška kod spremanja u bazu.", error: err.message });
+  }
+});
+
+// GET svi problemi
+app.get("/api/problems", async (req, res) => {
+  try {
+    const col = await getCollection("problems");
+    const problems = await col.find().sort({ createdAt: -1 }).toArray(); 
+    res.json(problems);
+  } catch (err) {
+    console.error("🔥 Greška kod čitanja problema:", err);
+    res.status(500).json({ message: "Greška kod čitanja iz baze.", error: err.message });
+  }
+});
 
 
 app.listen(PORT, () => {
