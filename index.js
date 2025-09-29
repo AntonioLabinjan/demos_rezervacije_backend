@@ -2,6 +2,7 @@ const express = require('express')
 const cors = require('cors')
 const nodemailer = require('nodemailer')
 const { getCollection } = require('./db')
+const { ObjectId } = require('mongodb')
 require('dotenv').config();
 
 const app = express()
@@ -15,33 +16,32 @@ let transporter;
 async function setupEmail() {
   try {
     transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 465,
-  secure: true, // koristi SSL
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_PASS,
-  },
-});
-
+      host: "smtp.gmail.com",
+      port: 465,
+      secure: true,
+      auth: {
+        user: process.env.GMAIL_USER,
+        pass: process.env.GMAIL_PASS,
+      },
+    });
     console.log('📧 Gmail SMTP konfiguriran');
   } catch (error) {
     console.error('Greška kod email setup-a:', error);
   }
 }
 
-// Pokreni email setup
 setupEmail();
 
 // Pošalji email notifikaciju
+// Pošalji email notifikaciju
 async function sendReservationEmail(reservation) {
-  const { discordNickname, description, date, time, course } = reservation;
-  
+  const { discordNickname, description, date, time, course, tags } = reservation;
+
   if (!transporter) {
     console.log('⚠️ Email još nije spreman, preskačem...');
     return;
   }
-  
+
   const mailOptions = {
     from: process.env.GMAIL_USER || 'your-email@gmail.com',
     to: DEMONSTRATOR_EMAIL,
@@ -58,6 +58,7 @@ async function sendReservationEmail(reservation) {
             <p><strong>🕐 Vrijeme:</strong> ${time}</p>
             <p><strong>📚 Predmet:</strong> ${course}</p>
             <p><strong>👤 Student:</strong> ${discordNickname}</p>
+            <p><strong>🏷️ Tagovi:</strong> ${tags?.join(", ") || "Nema"}</p>
             <p><strong>📝 Opis:</strong> ${description}</p>
           </div>
         </div>
@@ -73,19 +74,22 @@ async function sendReservationEmail(reservation) {
 
   try {
     const info = await transporter.sendMail(mailOptions);
-    console.log('✅ Email poslat uspješno na:', DEMONSTRATOR_EMAIL);
+    console.log('✅ Email poslan na:', DEMONSTRATOR_EMAIL);
     console.log('📧 Message ID:', info.messageId);
   } catch (error) {
     console.error('🔥 Greška kod slanja emaila:', error.message);
   }
 }
 
+
 app.use(cors())
 app.use(express.json());
 
+// ==================== REZERVACIJE ====================
+
 // POST rezervacija
 app.post("/api/reservations", async (req, res) => {
-  const { discordNickname, description, date, time, course } = req.body;
+  const { discordNickname, description, date, time, course, tags } = req.body;
   if (!discordNickname || !description || !date || !time || !course) {
     return res.status(400).json({ message: "Sva polja su obavezna." });
   }
@@ -96,10 +100,9 @@ app.post("/api/reservations", async (req, res) => {
     const exists = await col.findOne({ dateTime });
     if (exists) return res.status(409).json({ message: "Taj termin je već zauzet." });
 
-    const reservation = { discordNickname, description, date, time, course, dateTime };
+    const reservation = { discordNickname, description, date, time, course, dateTime, tags: tags || [] };
     await col.insertOne(reservation);
 
-    // 🚀 Pošalji email automatski!
     await sendReservationEmail(reservation);
 
     res.status(200).json({ message: "Rezervacija uspješna! 📧 Email poslan." });
@@ -112,13 +115,8 @@ app.post("/api/reservations", async (req, res) => {
 // GET sve rezervacije
 app.get("/api/reservations", async (req, res) => {
   try {
-    console.log("➡️ Dohvaćam kolekciju reservations...");
     const col = await getCollection("demos");
-    console.log("✅ Kolekcija dohvaćena:", col.collectionName);
-
     const reservations = await col.find().toArray();
-    console.log("📦 Rezervacije iz baze:", reservations.length);
-    
     res.json(reservations);
   } catch (err) {
     console.error("🔥 Greška kod čitanja iz baze:", err);
@@ -126,12 +124,73 @@ app.get("/api/reservations", async (req, res) => {
   }
 });
 
+// UPDATE rezervacija
+app.put("/api/reservations/:id", async (req, res) => {
+  const { id } = req.params;
+  const { discordNickname, description, date, time, course } = req.body;
+
+  if (!discordNickname || !description || !date || !time || !course) {
+    return res.status(400).json({ message: "Sva polja su obavezna." });
+  }
+
+  const dateTime = `${date} ${time}`;
+
+  try {
+    const col = await getCollection("demos");
+    
+    // Provjeri da li postoji drugi termin s istim dateTime (ne uključujući trenutni)
+    const exists = await col.findOne({ 
+      dateTime, 
+      _id: { $ne: new ObjectId(id) } 
+    });
+    
+    if (exists) {
+      return res.status(409).json({ message: "Taj termin je već zauzet." });
+    }
+
+    const result = await col.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { discordNickname, description, date, time, course, dateTime } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: "Rezervacija nije pronađena." });
+    }
+
+    res.status(200).json({ message: "Rezervacija uspješno ažurirana!" });
+  } catch (err) {
+    console.error("🔥 Greška kod ažuriranja:", err);
+    res.status(500).json({ message: "Greška kod ažuriranja.", error: err.message });
+  }
+});
+
+// DELETE rezervacija
+app.delete("/api/reservations/:id", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const col = await getCollection("demos");
+    const result = await col.deleteOne({ _id: new ObjectId(id) });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ message: "Rezervacija nije pronađena." });
+    }
+
+    res.status(200).json({ message: "Rezervacija uspješno obrisana!" });
+  } catch (err) {
+    console.error("🔥 Greška kod brisanja:", err);
+    res.status(500).json({ message: "Greška kod brisanja.", error: err.message });
+  }
+});
+
+// ==================== PROBLEMI ====================
+
 // POST problem
 app.post("/api/problems", async (req, res) => {
-  const { discordNickname, description, course, language, images } = req.body;
+  const { discordNickname, description, course, language, images, tags } = req.body;
 
-  if (!discordNickname || !description || !course || !language) {
-    return res.status(400).json({ message: "Sva polja osim slike su obavezna." });
+  if (!discordNickname || !description || !course) {
+    return res.status(400).json({ message: "Discord nick, opis i kolegij su obavezni." });
   }
 
   try {
@@ -141,8 +200,9 @@ app.post("/api/problems", async (req, res) => {
       discordNickname,
       description,
       course,
-      language,
+      language: language || '',
       images: images || [],
+      tags: tags || [],
       createdAt: new Date()
     };
 
@@ -167,7 +227,63 @@ app.get("/api/problems", async (req, res) => {
   }
 });
 
+// UPDATE problem
+app.put("/api/problems/:id", async (req, res) => {
+  const { id } = req.params;
+  const { discordNickname, description, course, language, images, tags } = req.body;
+
+  if (!discordNickname || !description || !course) {
+    return res.status(400).json({ message: "Discord nick, opis i kolegij su obavezni." });
+  }
+
+  try {
+    const col = await getCollection("problems");
+
+    const result = await col.updateOne(
+      { _id: new ObjectId(id) },
+      { 
+        $set: { 
+          discordNickname, 
+          description, 
+          course, 
+          language: language || '',
+          images: images || [],
+          tags: tags || []
+        } 
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: "Problem nije pronađen." });
+    }
+
+    res.status(200).json({ message: "Problem uspješno ažuriran!" });
+  } catch (err) {
+    console.error("🔥 Greška kod ažuriranja problema:", err);
+    res.status(500).json({ message: "Greška kod ažuriranja.", error: err.message });
+  }
+});
+
+// DELETE problem
+app.delete("/api/problems/:id", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const col = await getCollection("problems");
+    const result = await col.deleteOne({ _id: new ObjectId(id) });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ message: "Problem nije pronađen." });
+    }
+
+    res.status(200).json({ message: "Problem uspješno obrisan!" });
+  } catch (err) {
+    console.error("🔥 Greška kod brisanja problema:", err);
+    res.status(500).json({ message: "Greška kod brisanja.", error: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`✅ Server dela na http://localhost:${PORT}`)
   console.log('📧 Email sistem automatski konfiguriran!')
-})
+});
