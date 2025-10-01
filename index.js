@@ -3,16 +3,22 @@ const cors = require('cors')
 const nodemailer = require('nodemailer')
 const { getCollection } = require('./db')
 const { ObjectId } = require('mongodb')
-require('dotenv').config();
+const bcrypt = require('bcryptjs')
+const jwt = require('jsonwebtoken')
+require('dotenv').config()
 
 const app = express()
 const PORT = process.env.PORT || 3000
+const JWT_SECRET = process.env.JWT_SECRET || "tajna"
+
+// Middleware PRIJE svih ruta
+app.use(cors())
+app.use(express.json())
 
 // Gmail SMTP configuration
 const DEMONSTRATOR_EMAIL = 'alabinjan6@gmail.com'
 let transporter;
 
-// Gmail SMTP setup
 async function setupEmail() {
   try {
     transporter = nodemailer.createTransport({
@@ -32,8 +38,24 @@ async function setupEmail() {
 
 setupEmail();
 
-// Pošalji email notifikaciju
-// Pošalji email notifikaciju
+// Auth Middleware
+function authMiddleware(req, res, next) {
+  const authHeader = req.headers["authorization"];
+  if (!authHeader) return res.status(401).json({ message: "Nema tokena" });
+
+  const token = authHeader.split(" ")[1];
+  if (!token) return res.status(401).json({ message: "Token nije ispravan" });
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded; // { id, email, course }
+    next();
+  } catch (err) {
+    return res.status(403).json({ message: "Token nije važeći" });
+  }
+}
+
+// Email funkcija
 async function sendReservationEmail(reservation) {
   const { discordNickname, description, date, time, course, tags } = reservation;
 
@@ -62,32 +84,77 @@ async function sendReservationEmail(reservation) {
             <p><strong>📝 Opis:</strong> ${description}</p>
           </div>
         </div>
-        
-        <div style="background: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px 0;">
-          <p style="margin: 0; color: #64748b; font-size: 14px;">
-            ⚡ Ova poruka je automatski generirana kada student napravi novu rezervaciju.
-          </p>
-        </div>
       </div>
     `
   };
 
   try {
     const info = await transporter.sendMail(mailOptions);
-    console.log('✅ Email poslan na:', DEMONSTRATOR_EMAIL);
-    console.log('📧 Message ID:', info.messageId);
+    console.log('✅ Email poslan:', info.messageId);
   } catch (error) {
     console.error('🔥 Greška kod slanja emaila:', error.message);
   }
 }
 
+// ==================== AUTH RUTE ====================
 
-app.use(cors())
-app.use(express.json());
+app.post("/api/signup", async (req, res) => {
+  const { email, password, course } = req.body
+  if (!email || !password || !course) {
+    return res.status(400).json({ message: "Email, lozinka i kolegij su obavezni." })
+  }
+
+  try {
+    const col = await getCollection("demos_users")
+    const existingUser = await col.findOne({ email })
+    if (existingUser) {
+      return res.status(409).json({ message: "Korisnik s tim emailom već postoji." })
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10)
+    const newUser = { email, password: hashedPassword, course }
+
+    await col.insertOne(newUser)
+    res.status(201).json({ message: "Signup uspješan!" })
+  } catch (err) {
+    console.error("🔥 Greška kod signup-a:", err)
+    res.status(500).json({ message: "Greška kod signup-a.", error: err.message })
+  }
+})
+
+app.post("/api/login", async (req, res) => {
+  const { email, password } = req.body
+  if (!email || !password) {
+    return res.status(400).json({ message: "Email i lozinka su obavezni." })
+  }
+
+  try {
+    const col = await getCollection("demos_users")
+    const user = await col.findOne({ email })
+    if (!user) return res.status(401).json({ message: "Neispravan email ili lozinka." })
+
+    const isMatch = await bcrypt.compare(password, user.password)
+    if (!isMatch) return res.status(401).json({ message: "Neispravan email ili lozinka." })
+
+    const token = jwt.sign(
+      { id: user._id, email: user.email, course: user.course },
+      JWT_SECRET,
+      { expiresIn: "2h" }
+    )
+
+    res.status(200).json({ 
+      message: "Login uspješan!", 
+      token,
+      user: { email: user.email, course: user.course }
+    })
+  } catch (err) {
+    console.error("🔥 Greška kod login-a:", err)
+    res.status(500).json({ message: "Greška kod login-a.", error: err.message })
+  }
+})
 
 // ==================== REZERVACIJE ====================
 
-// POST rezervacija
 app.post("/api/reservations", async (req, res) => {
   const { discordNickname, description, date, time, course, tags } = req.body;
   if (!discordNickname || !description || !date || !time || !course) {
@@ -100,7 +167,15 @@ app.post("/api/reservations", async (req, res) => {
     const exists = await col.findOne({ dateTime });
     if (exists) return res.status(409).json({ message: "Taj termin je već zauzet." });
 
-    const reservation = { discordNickname, description, date, time, course, dateTime, tags: tags || [] };
+    const reservation = { 
+      discordNickname, 
+      description, 
+      date, 
+      time, 
+      course, 
+      dateTime, 
+      tags: tags || [] 
+    };
     await col.insertOne(reservation);
 
     await sendReservationEmail(reservation);
@@ -112,11 +187,10 @@ app.post("/api/reservations", async (req, res) => {
   }
 });
 
-// GET sve rezervacije
-app.get("/api/reservations", async (req, res) => {
+app.get("/api/reservations", authMiddleware, async (req, res) => {
   try {
     const col = await getCollection("demos");
-    const reservations = await col.find().toArray();
+    const reservations = await col.find({ course: req.user.course }).toArray();
     res.json(reservations);
   } catch (err) {
     console.error("🔥 Greška kod čitanja iz baze:", err);
@@ -124,10 +198,9 @@ app.get("/api/reservations", async (req, res) => {
   }
 });
 
-// UPDATE rezervacija
-app.put("/api/reservations/:id", async (req, res) => {
+app.put("/api/reservations/:id", authMiddleware, async (req, res) => {
   const { id } = req.params;
-  const { discordNickname, description, date, time, course } = req.body;
+  const { discordNickname, description, date, time, course, tags } = req.body;
 
   if (!discordNickname || !description || !date || !time || !course) {
     return res.status(400).json({ message: "Sva polja su obavezna." });
@@ -138,7 +211,6 @@ app.put("/api/reservations/:id", async (req, res) => {
   try {
     const col = await getCollection("demos");
     
-    // Provjeri da li postoji drugi termin s istim dateTime (ne uključujući trenutni)
     const exists = await col.findOne({ 
       dateTime, 
       _id: { $ne: new ObjectId(id) } 
@@ -150,7 +222,7 @@ app.put("/api/reservations/:id", async (req, res) => {
 
     const result = await col.updateOne(
       { _id: new ObjectId(id) },
-      { $set: { discordNickname, description, date, time, course, dateTime } }
+      { $set: { discordNickname, description, date, time, course, dateTime, tags: tags || [] } }
     );
 
     if (result.matchedCount === 0) {
@@ -164,8 +236,7 @@ app.put("/api/reservations/:id", async (req, res) => {
   }
 });
 
-// DELETE rezervacija
-app.delete("/api/reservations/:id", async (req, res) => {
+app.delete("/api/reservations/:id", authMiddleware, async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -185,7 +256,6 @@ app.delete("/api/reservations/:id", async (req, res) => {
 
 // ==================== PROBLEMI ====================
 
-// POST problem
 app.post("/api/problems", async (req, res) => {
   const { discordNickname, description, course, language, images, tags } = req.body;
 
@@ -207,7 +277,6 @@ app.post("/api/problems", async (req, res) => {
     };
 
     await col.insertOne(problem);
-
     res.status(200).json({ message: "Problem uspješno postavljen!" });
   } catch (err) {
     console.error("🔥 Greška kod spremanja problema:", err);
@@ -215,7 +284,6 @@ app.post("/api/problems", async (req, res) => {
   }
 });
 
-// GET svi problemi
 app.get("/api/problems", async (req, res) => {
   try {
     const col = await getCollection("problems");
@@ -227,7 +295,6 @@ app.get("/api/problems", async (req, res) => {
   }
 });
 
-// UPDATE problem
 app.put("/api/problems/:id", async (req, res) => {
   const { id } = req.params;
   const { discordNickname, description, course, language, images, tags } = req.body;
@@ -264,7 +331,6 @@ app.put("/api/problems/:id", async (req, res) => {
   }
 });
 
-// DELETE problem
 app.delete("/api/problems/:id", async (req, res) => {
   const { id } = req.params;
 
