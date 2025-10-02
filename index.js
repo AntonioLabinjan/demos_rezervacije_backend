@@ -57,7 +57,7 @@ function authMiddleware(req, res, next) {
 
 // Email funkcija
 async function sendReservationEmail(reservation) {
-  const { discordNickname, description, date, time, course, tags } = reservation;
+  const { email, description, date, time, course, tags } = reservation;
 
   if (!transporter) {
     console.log('⚠️ Email još nije spreman, preskačem...');
@@ -79,7 +79,7 @@ async function sendReservationEmail(reservation) {
             <p><strong>📅 Datum:</strong> ${date}</p>
             <p><strong>🕐 Vrijeme:</strong> ${time}</p>
             <p><strong>📚 Predmet:</strong> ${course}</p>
-            <p><strong>👤 Student:</strong> ${discordNickname}</p>
+            <p><strong>👤 Student:</strong> ${email}</p>
             <p><strong>🏷️ Tagovi:</strong> ${tags?.join(", ") || "Nema"}</p>
             <p><strong>📝 Opis:</strong> ${description}</p>
           </div>
@@ -156,8 +156,8 @@ app.post("/api/login", async (req, res) => {
 // ==================== REZERVACIJE ====================
 
 app.post("/api/reservations", async (req, res) => {
-  const { discordNickname, description, date, time, course, tags } = req.body;
-  if (!discordNickname || !description || !date || !time || !course) {
+  const { email, description, date, time, course, tags } = req.body;
+  if (!email || !description || !date || !time || !course) {
     return res.status(400).json({ message: "Sva polja su obavezna." });
   }
 
@@ -168,7 +168,7 @@ app.post("/api/reservations", async (req, res) => {
     if (exists) return res.status(409).json({ message: "Taj termin je već zauzet." });
 
     const reservation = { 
-      discordNickname, 
+      email, 
       description, 
       date, 
       time, 
@@ -200,9 +200,9 @@ app.get("/api/reservations", authMiddleware, async (req, res) => {
 
 app.put("/api/reservations/:id", authMiddleware, async (req, res) => {
   const { id } = req.params;
-  const { discordNickname, description, date, time, course, tags } = req.body;
+  const { email, description, date, time, course, tags } = req.body;
 
-  if (!discordNickname || !description || !date || !time || !course) {
+  if (!email || !description || !date || !time || !course) {
     return res.status(400).json({ message: "Sva polja su obavezna." });
   }
 
@@ -222,7 +222,7 @@ app.put("/api/reservations/:id", authMiddleware, async (req, res) => {
 
     const result = await col.updateOne(
       { _id: new ObjectId(id) },
-      { $set: { discordNickname, description, date, time, course, dateTime, tags: tags || [] } }
+      { $set: { email, description, date, time, course, dateTime, tags: tags || [] } }
     );
 
     if (result.matchedCount === 0) {
@@ -257,17 +257,17 @@ app.delete("/api/reservations/:id", authMiddleware, async (req, res) => {
 // ==================== PROBLEMI ====================
 
 app.post("/api/problems", async (req, res) => {
-  const { discordNickname, description, course, language, images, tags } = req.body;
+  const { email, description, course, language, images, tags } = req.body;
 
-  if (!discordNickname || !description || !course) {
-    return res.status(400).json({ message: "Discord nick, opis i kolegij su obavezni." });
+  if (!email || !description || !course) {
+    return res.status(400).json({ message: "email, opis i kolegij su obavezni." });
   }
 
   try {
     const col = await getCollection("problems");
 
     const problem = {
-      discordNickname,
+      email,
       description,
       course,
       language: language || '',
@@ -297,10 +297,10 @@ app.get("/api/problems", async (req, res) => {
 
 app.put("/api/problems/:id", async (req, res) => {
   const { id } = req.params;
-  const { discordNickname, description, course, language, images, tags } = req.body;
+  const { email, description, course, language, images, tags } = req.body;
 
-  if (!discordNickname || !description || !course) {
-    return res.status(400).json({ message: "Discord nick, opis i kolegij su obavezni." });
+  if (!email || !description || !course) {
+    return res.status(400).json({ message: "Email, opis i kolegij su obavezni." });
   }
 
   try {
@@ -310,7 +310,7 @@ app.put("/api/problems/:id", async (req, res) => {
       { _id: new ObjectId(id) },
       { 
         $set: { 
-          discordNickname, 
+          email, 
           description, 
           course, 
           language: language || '',
@@ -353,3 +353,4 @@ app.listen(PORT, () => {
   console.log(`✅ Server dela na http://localhost:${PORT}`)
   console.log('📧 Email sistem automatski konfiguriran!')
 });
+
