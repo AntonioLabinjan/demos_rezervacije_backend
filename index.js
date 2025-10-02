@@ -299,8 +299,8 @@ app.put("/api/problems/:id", async (req, res) => {
   const { id } = req.params;
   const { email, description, course, language, images, tags } = req.body;
 
-  if (!email || !description || !course) {
-    return res.status(400).json({ message: "Email, opis i kolegij su obavezni." });
+  if (!email|| !description || !course) {
+    return res.status(400).json({ message: "email, opis i kolegij su obavezni." });
   }
 
   try {
@@ -353,4 +353,3 @@ app.listen(PORT, () => {
   console.log(`✅ Server dela na http://localhost:${PORT}`)
   console.log('📧 Email sistem automatski konfiguriran!')
 });
-
