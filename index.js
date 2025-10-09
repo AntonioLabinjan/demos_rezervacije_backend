@@ -11,12 +11,15 @@ const app = express()
 const PORT = process.env.PORT || 3000
 const JWT_SECRET = process.env.JWT_SECRET || "tajna"
 
-// Middleware PRIJE svih ruta
 app.use(cors())
 app.use(express.json())
 
-// Gmail SMTP configuration
 const DEMONSTRATOR_EMAIL = 'alabinjan6@gmail.com'
+const COURSE_EMAILS = {
+  "Programsko inženjerstvo": ["alabinjan6@gmail.com"],
+  "Baze podataka": ["samoneugrimaldu@gmail.com"]
+  // stavit ćemo tu sve službene mailove od demosa i ciao
+}
 let transporter;
 
 async function setupEmail() {
@@ -63,10 +66,10 @@ async function sendReservationEmail(reservation) {
     console.log('⚠️ Email još nije spreman, preskačem...');
     return;
   }
-
-  const mailOptions = {
+  const recipientEmail = COURSE_EMAILS[course] || DEMONSTRATOR_EMAIL;
+   const mailOptions = {
     from: process.env.GMAIL_USER || 'your-email@gmail.com',
-    to: DEMONSTRATOR_EMAIL,
+    to: Array.isArray(recipientEmail) ? recipientEmail.join(",") : recipientEmail,
     subject: `🔔 Nova rezervacija - ${course}`,
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -90,7 +93,7 @@ async function sendReservationEmail(reservation) {
 
   try {
     const info = await transporter.sendMail(mailOptions);
-    console.log('✅ Email poslan:', info.messageId);
+    console.log(`✅ Email poslan ${recipientEmail} (${course}) -> ${info.messageId}`);
   } catch (error) {
     console.error('🔥 Greška kod slanja emaila:', error.message);
   }
@@ -153,8 +156,6 @@ app.post("/api/login", async (req, res) => {
   }
 })
 
-// ==================== REZERVACIJE ====================
-
 app.post("/api/reservations", async (req, res) => {
   const { email, description, date, time, course, tags } = req.body;
   if (!email || !description || !date || !time || !course) {
@@ -163,7 +164,7 @@ app.post("/api/reservations", async (req, res) => {
 
   const dateTime = `${date} ${time}`;
   try {
-    const col = await getCollection("demos");
+    const col = await getCollection("reservations");
     const exists = await col.findOne({ dateTime });
     if (exists) return res.status(409).json({ message: "Taj termin je već zauzet." });
 
@@ -189,7 +190,7 @@ app.post("/api/reservations", async (req, res) => {
 
 app.get("/api/reservations", authMiddleware, async (req, res) => {
   try {
-    const col = await getCollection("demos");
+    const col = await getCollection("reservations");
     const reservations = await col.find({ course: req.user.course }).toArray();
     res.json(reservations);
   } catch (err) {
@@ -209,7 +210,7 @@ app.put("/api/reservations/:id", authMiddleware, async (req, res) => {
   const dateTime = `${date} ${time}`;
 
   try {
-    const col = await getCollection("demos");
+    const col = await getCollection("reservations");
     
     const exists = await col.findOne({ 
       dateTime, 
@@ -240,7 +241,7 @@ app.delete("/api/reservations/:id", authMiddleware, async (req, res) => {
   const { id } = req.params;
 
   try {
-    const col = await getCollection("demos");
+    const col = await getCollection("reservations");
     const result = await col.deleteOne({ _id: new ObjectId(id) });
 
     if (result.deletedCount === 0) {
