@@ -157,36 +157,36 @@ app.post("/api/login", async (req, res) => {
 })
 
 app.post("/api/reservations", async (req, res) => {
-  const { email, description, date, time, course, tags } = req.body;
-  if (!email || !description || !date || !time || !course) {
+  const { email, description, startDate, endDate, time, course, tags } = req.body;
+
+  if (!email || !description || !startDate || !endDate || !time || !course) {
     return res.status(400).json({ message: "Sva polja su obavezna." });
   }
 
-  const dateTime = `${date} ${time}`;
   try {
     const col = await getCollection("reservations");
-    const exists = await col.findOne({ dateTime });
-    if (exists) return res.status(409).json({ message: "Taj termin je već zauzet." });
 
     const reservation = { 
-      email, 
-      description, 
-      date, 
-      time, 
-      course, 
-      dateTime, 
-      tags: tags || [] 
+      email,
+      description,
+      startDate,
+      endDate,
+      time,
+      course,
+      tags: tags || [],
+      createdAt: new Date()
     };
-    await col.insertOne(reservation);
 
+    await col.insertOne(reservation);
     await sendReservationEmail(reservation);
 
     res.status(200).json({ message: "Rezervacija uspješna! 📧 Email poslan." });
   } catch (err) {
-    console.error(err);
+    console.error("🔥 Greška kod spremanja u bazu:", err);
     res.status(500).json({ message: "Greška kod spremanja u bazu." });
   }
 });
+
 
 app.get("/api/reservations", authMiddleware, async (req, res) => {
   try {
@@ -199,31 +199,21 @@ app.get("/api/reservations", authMiddleware, async (req, res) => {
   }
 });
 
+
 app.put("/api/reservations/:id", authMiddleware, async (req, res) => {
   const { id } = req.params;
-  const { email, description, date, time, course, tags } = req.body;
+  const { email, description, startDate, endDate, time, course, tags } = req.body;
 
-  if (!email || !description || !date || !time || !course) {
+  if (!email || !description || !startDate || !endDate || !time || !course) {
     return res.status(400).json({ message: "Sva polja su obavezna." });
   }
 
-  const dateTime = `${date} ${time}`;
-
   try {
     const col = await getCollection("reservations");
-    
-    const exists = await col.findOne({ 
-      dateTime, 
-      _id: { $ne: new ObjectId(id) } 
-    });
-    
-    if (exists) {
-      return res.status(409).json({ message: "Taj termin je već zauzet." });
-    }
 
     const result = await col.updateOne(
       { _id: new ObjectId(id) },
-      { $set: { email, description, date, time, course, dateTime, tags: tags || [] } }
+      { $set: { email, description, startDate, endDate, time, course, tags: tags || [] } }
     );
 
     if (result.matchedCount === 0) {
@@ -236,6 +226,7 @@ app.put("/api/reservations/:id", authMiddleware, async (req, res) => {
     res.status(500).json({ message: "Greška kod ažuriranja.", error: err.message });
   }
 });
+
 
 app.delete("/api/reservations/:id", authMiddleware, async (req, res) => {
   const { id } = req.params;
@@ -254,6 +245,7 @@ app.delete("/api/reservations/:id", authMiddleware, async (req, res) => {
     res.status(500).json({ message: "Greška kod brisanja.", error: err.message });
   }
 });
+
 
 // ==================== PROBLEMI ====================
 
